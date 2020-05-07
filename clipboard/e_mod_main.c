@@ -48,14 +48,14 @@ static Eina_Bool _cb_event_selection(Instance *instance, int type __UNUSED__, Ec
 static Eina_Bool _cb_event_owner(Instance *instance __UNUSED__, int type __UNUSED__, Ecore_X_Event_Fixes_Selection_Notify * event);
 static void      _cb_menu_post_deactivate(void *data, E_Menu *menu __UNUSED__);
 static void      _cb_context_show(void *data, Evas *evas __UNUSED__, Evas_Object *obj __UNUSED__, Mouse_Event *event);
-static void      _clipboard_cb_paste_item(void *d1, void *d2);
-static void      _cb_clear_history(void *d1, void *d2 __UNUSED__);
+static void      _clipboard_cb_paste_item(void *content, void *inst);
+static void      _cb_clear_history(void *inst, void *data __UNUSED__);
 static void      _cb_dialog_delete(void *data __UNUSED__);
 static void      _cb_dialog_keep(void *data __UNUSED__);
 static void      _cb_action_switch(E_Object *o __UNUSED__, const char *params, Instance *data, Evas *evas __UNUSED__, Evas_Object *obj __UNUSED__, Mouse_Event *event __UNUSED__);
 static void      _cb_config_show(void *data__UNUSED__, E_Menu *m __UNUSED__, E_Menu_Item *mi __UNUSED__);
 
-static void      _clipboard_config_show(void *d1, void *d2 __UNUSED__);
+static void      _clipboard_config_show(void *inst, void *data __UNUSED__);
 static void      _clipboard_popup_free(Instance *inst);
 /*   And then some auxillary functions */
 static void      _clip_config_new(E_Module *m);
@@ -357,7 +357,7 @@ _clipboard_popup_new(Instance *inst)
                                NULL,
                                inst);*/
   e_object_data_set(E_OBJECT(inst->popup), inst);
-  //E_OBJECT_DEL_SET(inst->popup, _clipboard_popup_del_cb);
+  E_OBJECT_DEL_SET(inst->popup, _clipboard_popup_del_cb);
 }
 static Eina_Bool
 _cb_event_selection(Instance *instance, int type __UNUSED__, Ecore_X_Event_Selection_Notify * event)
@@ -510,7 +510,7 @@ clip_save(Eina_List *items, Eina_Bool force)
 }
 
 static void
-_cb_clear_history(void *d1, void *d2 __UNUSED__)
+_cb_clear_history(void *inst, void *data __UNUSED__)
 {
   EINA_SAFETY_ON_NULL_RETURN(clip_cfg);
 
@@ -526,7 +526,7 @@ _cb_clear_history(void *d1, void *d2 __UNUSED__)
   }
   else
     _clear_history();
-  _clipboard_popup_free((Instance *) d1);
+  _clipboard_popup_free((Instance *) inst);
 }
 
 static void
@@ -557,11 +557,11 @@ cb_clipboard_save(void *data __UNUSED__)
 }
 
 static void
-_clipboard_cb_paste_item(void *d1, void *d2)
+_clipboard_cb_paste_item(void *content, void *inst)
 {
-   _x_clipboard_update((const char *) d1);
-  if(d2)
-    _clipboard_popup_free((Instance *) d2);
+   _x_clipboard_update((const char *) content);
+  if(inst)
+    _clipboard_popup_free((Instance *) inst);
 }
 
 static void
@@ -734,12 +734,12 @@ e_modapi_init (E_Module *m)
 }
 
 static void
-_clipboard_config_show(void *d1, void *d2 __UNUSED__)
+_clipboard_config_show(void *inst, void *data __UNUSED__)
 {
   if (!clip_cfg) return;
   if (clip_cfg->config_dialog) return;
   config_clipboard_module(NULL, NULL);
-  _clipboard_popup_free((Instance *) d1);
+  _clipboard_popup_free((Instance *) inst);
 }
 
 static void
