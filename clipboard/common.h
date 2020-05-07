@@ -49,11 +49,8 @@ struct _Instance
 
     /* pointer to this gadget's container */
     E_Gadcon_Client *gcc;
-    /* Pointer to gadget or float menu */
-    E_Menu *menu;
-    /* Pointer to mouse button object
-     * to add call back to */
-    Evas_Object *o_button;
+    Evas_Object *o_button, *table;
+    E_Gadcon_Popup *popup;
 };
 
 typedef struct _Mod_Inst Mod_Inst;

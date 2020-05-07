@@ -46,29 +46,27 @@ static Eina_Bool _cb_clipboard_request(void *data __UNUSED__);
 
 static Eina_Bool _cb_event_selection(Instance *instance, int type __UNUSED__, Ecore_X_Event_Selection_Notify * event);
 static Eina_Bool _cb_event_owner(Instance *instance __UNUSED__, int type __UNUSED__, Ecore_X_Event_Fixes_Selection_Notify * event);
-static void      _cb_menu_item(Clip_Data *selected_clip);
 static void      _cb_menu_post_deactivate(void *data, E_Menu *menu __UNUSED__);
-static void      _cb_menu_show(void *data, Evas *evas __UNUSED__, Evas_Object *obj __UNUSED__, Mouse_Event *event);
 static void      _cb_context_show(void *data, Evas *evas __UNUSED__, Evas_Object *obj __UNUSED__, Mouse_Event *event);
-static void      _cb_clear_history(Instance *inst);
+static void      _clipboard_cb_paste_item(void *d1, void *d2);
+static void      _cb_clear_history(void *d1, void *d2 __UNUSED__);
 static void      _cb_dialog_delete(void *data __UNUSED__);
 static void      _cb_dialog_keep(void *data __UNUSED__);
-static void      _cb_action_switch(E_Object *o __UNUSED__, const char *params, Instance *data, Evas *evas __UNUSED__, Evas_Object *obj __UNUSED__, Mouse_Event *event);
+static void      _cb_action_switch(E_Object *o __UNUSED__, const char *params, Instance *data, Evas *evas __UNUSED__, Evas_Object *obj __UNUSED__, Mouse_Event *event __UNUSED__);
 static void      _cb_config_show(void *data__UNUSED__, E_Menu *m __UNUSED__, E_Menu_Item *mi __UNUSED__);
 
+static void      _clipboard_config_show(void *d1, void *d2 __UNUSED__);
+static void      _clipboard_popup_free(Instance *inst);
 /*   And then some auxillary functions */
 static void      _clip_config_new(E_Module *m);
 static void      _clip_config_free(void);
 static void      _clip_inst_free(Instance *inst);
 static void      _clip_add_item(Clip_Data *clip_data);
-static int       _menu_fill(Instance *inst, Eina_Bool mouse_event);
+static void      _clipboard_popup_new(Instance *inst);
 static void      _clear_history(void);
 static void      _x_clipboard_update(const char *text);
 static Eina_List *     _item_in_history(Clip_Data *cd);
 static int             _clip_compare(Clip_Data *cd, char *text);
-static void  _set_mouse_coord(Instance *inst, Eina_Bool mouse_event,
-                              Evas_Coord * const x, Evas_Coord * const y,
-                              Evas_Coord * const w, Evas_Coord * const h);
 
 /* new module needs a new config :), or config too old and we need one anyway */
 static void
@@ -134,6 +132,24 @@ _clip_config_free(void)
   E_FREE(clip_cfg);
 }
 
+static void
+_clipboard_cb_mouse_down(void *data,
+                         Evas *evas  __UNUSED__,
+                         Evas_Object *obj  __UNUSED__,
+                         void *event)
+{
+  Instance *inst = data;
+  Evas_Event_Mouse_Down *ev = event;
+
+  if (ev->button == 1)
+    {
+      if (inst->popup) _clipboard_popup_free(inst);
+      else _clipboard_popup_new(inst);
+    }
+  else if (ev->button == 3)
+    _cb_context_show(data, NULL, NULL, event);
+}
+
 /*
  * This function is called when you add the Module to a Shelf or Gadgets,
  *   this is where you want to add functions to do things.
@@ -158,8 +174,10 @@ _gc_init(E_Gadcon *gc, const char *name, const char *id, const char *style)
   inst->o_button = o;
 
   e_gadcon_client_util_menu_attach(gcc);
-  evas_object_event_callback_add(inst->o_button, EVAS_CALLBACK_MOUSE_DOWN, (Evas_Object_Event_Cb) _cb_menu_show, inst);
-  evas_object_event_callback_add(inst->o_button, EVAS_CALLBACK_MOUSE_DOWN, (Evas_Object_Event_Cb) _cb_context_show, inst);
+  evas_object_event_callback_add(inst->o_button,
+                                  EVAS_CALLBACK_MOUSE_DOWN,
+                                  (Evas_Object_Event_Cb)_clipboard_cb_mouse_down,
+                                  inst);
 
   return gcc;
 }
@@ -172,7 +190,11 @@ _gc_init(E_Gadcon *gc, const char *name, const char *id, const char *style)
 static void
 _gc_shutdown(E_Gadcon_Client *gcc)
 {
-  _clip_inst_free(gcc->data);
+  Instance *inst;
+
+   inst = gcc->data;
+  _clip_inst_free(inst);
+  _clipboard_popup_free(inst);
 }
 
 static void
@@ -214,50 +236,8 @@ _gc_id_new (const E_Gadcon_Client_Class *client_class __UNUSED__)
   return _gadcon_class.name;
 }
 
-/**
- * @brief  Generic call back function to Create Clipboard menu
- *
- * @param  inst, pointer to calling Instance
- *         event, pointer to Ecore Event which triggered call back
- *
- * @return void
- *
- *  Here we attempt to handle all Ecore events which trigger display of the
- *  clipboard menu: either right clicking a Clipboard gadget or pressing a key
- *  or key combination bound to Clipboard Show Float menu. The generic nature
- *  of this function is a preliminary atempt to avoid repeated code but at the
- *  same time keep the logic relatively simple.
- *
- */
-
 static void
-_cb_menu_show(void *data, Evas *evas __UNUSED__, Evas_Object *obj __UNUSED__, Mouse_Event *event)
-{
-  EINA_SAFETY_ON_NULL_RETURN(data);
-  EINA_SAFETY_ON_NULL_RETURN(event);
-
-  Eina_Bool mouse_event = (ecore_event_current_type_get() == MOUSE_BUTTON);
-  Instance *inst = mouse_event ? data: clip_inst->inst;
-  Evas_Coord x, y, w, h;
-  unsigned dir, timestamp;
-
-  /* Ignore all mouse events but right clicks  */
-  if (mouse_event)
-    IF_TRUE_RETURN(event->button != 1);
-  /* Set time_stamp and Evas coordinates  */
-  timestamp = mouse_event ? event->timestamp : 1;
-  _set_mouse_coord(inst, mouse_event, &x,&y, &w, &h);
-  /* Fill menu  */
-  dir = _menu_fill(inst, mouse_event);
-  if (inst->gcc) e_gadcon_locked_set(inst->gcc->gadcon, EINA_TRUE);
-  /* Activate Menu  */
-  e_menu_activate_mouse(inst->menu,
-                        e_util_zone_current_get(e_manager_current_get()),
-                        x, y, w, h, dir, timestamp);
-}
-
-static void
-_cb_context_show(void *data, Evas *evas __UNUSED__, Evas_Object *obj __UNUSED__, Mouse_Event *event)
+_cb_context_show(void *data,Evas *evas __UNUSED__, Evas_Object *obj __UNUSED__, Mouse_Event *event)
 {
   EINA_SAFETY_ON_NULL_RETURN(data);
   EINA_SAFETY_ON_NULL_RETURN(event);
@@ -292,43 +272,33 @@ _cb_context_show(void *data, Evas *evas __UNUSED__, Evas_Object *obj __UNUSED__,
 }
 
 static void
-_set_mouse_coord(Instance *inst,
-                 Eina_Bool mouse_event,
-                 Evas_Coord * const x, Evas_Coord * const y,
-                 Evas_Coord * const w, Evas_Coord * const h)
+_clipboard_popup_free(Instance *inst)
 {
-   int cx, cy;
-   E_Container *con;
-   E_Manager   *man;
-
-  if (mouse_event){
-    evas_object_geometry_get(inst->o_button, x, y, w, h);
-    e_gadcon_canvas_zone_geometry_get(inst->gcc->gadcon, &cx, &cy,
-                                        NULL, NULL);
-    *x += cx;
-    *y += cy;
-  } else {
-    man = e_manager_current_get();
-    con = e_container_current_get(man);
-    ecore_x_pointer_xy_get(con->win, x, y);
-    *w = 1;
-    *h = 1;
-  }
+	inst->o_button = NULL;
+	inst->table = NULL;
+	E_FN_DEL(e_object_del, inst->popup);
 }
 
-static int
-_menu_fill(Instance *inst, Eina_Bool mouse_event)
+static void
+_clipboard_popup_del_cb(void *obj)
 {
-  EINA_SAFETY_ON_NULL_RETURN_VAL(inst, E_GADCON_ORIENT_VERT);
+	_clipboard_popup_free(e_object_data_get(obj));
+}
 
-  E_Menu_Item *mi;
-  /* Default Orientation of menu for float list */
-  unsigned dir = E_GADCON_ORIENT_VERT;
+static void
+_clipboard_popup_new(Instance *inst)
+{
+  EINA_SAFETY_ON_FALSE_RETURN(inst->popup == NULL);
+  Evas *evas;
+  Evas_Object *o;
+  int row = 0;
+  // do not create twice
+  if(inst->popup) return;
 
-  inst->menu = e_menu_new();
-  if (!mouse_event){
-    e_menu_post_deactivate_callback_set(inst->menu, _cb_menu_post_deactivate, inst);
-  }
+  inst->popup = e_gadcon_popup_new(inst->gcc);
+  evas = inst->popup->win->evas;
+
+  inst->table = e_widget_table_add(evas, 0);
 
   if (clip_inst->items){
     Eina_List *it;
@@ -343,85 +313,51 @@ _menu_fill(Instance *inst, Eina_Bool mouse_event)
       clip_inst->items=eina_list_reverse(clip_inst->items);
 
     /* show list in history menu  */
-    EINA_LIST_FOREACH(clip_inst->items, it, clip){
-      mi = e_menu_item_new(inst->menu);
-      if (label_length_changed) {
-        free(clip->name);
-        set_clip_name(&clip->name, clip->content,
-                       clip_cfg->ignore_ws, clip_cfg->label_length);
+    EINA_LIST_FOREACH(clip_inst->items, it, clip)
+      {
+        if (label_length_changed) {
+          free(clip->name);
+          set_clip_name(&clip->name, clip->content,
+                         clip_cfg->ignore_ws, clip_cfg->label_length);
+        }
+        o = e_widget_button_add(evas,
+                                clip->name,
+                                NULL,
+                                _clipboard_cb_paste_item,
+                                clip->content,
+                                inst);
+        e_widget_table_object_align_append(inst->table, o, 0, row, 2, 1, 1, 0, 1, 0, 0, 0.5);
+        row++;
       }
-      e_menu_item_label_set(mi, clip->name);
-      e_menu_item_callback_set(mi, (E_Menu_Cb)_cb_menu_item, clip);
-    }
+    /* revert list back if selected  */
+    if (clip_cfg->hist_reverse)
+      clip_inst->items=eina_list_reverse(clip_inst->items);
   }
-  else {
-    mi = e_menu_item_new(inst->menu);
-    e_menu_item_label_set(mi, _("Empty"));
-    e_menu_item_disabled_set(mi, EINA_TRUE);
-  }
-
-  mi = e_menu_item_new(inst->menu);
-  e_menu_item_separator_set(mi, EINA_TRUE);
-
-  mi = e_menu_item_new(inst->menu);
-  e_menu_item_label_set(mi, _("Clear"));
-  e_util_menu_item_theme_icon_set(mi, "edit-clear");
-  e_menu_item_callback_set(mi, (E_Menu_Cb) _cb_clear_history, inst);
-
-  if (clip_inst->items)
-    e_menu_item_disabled_set(mi, EINA_FALSE);
   else
-    e_menu_item_disabled_set(mi, EINA_TRUE);
-
-  mi = e_menu_item_new(inst->menu);
-  e_menu_item_separator_set(mi, EINA_TRUE);
-
-  mi = e_menu_item_new(inst->menu);
-  e_menu_item_label_set(mi, _("Settings"));
-  e_util_menu_item_theme_icon_set(mi, "preferences-system");
-  e_menu_item_callback_set(mi, _cb_config_show, NULL);
-
-  if (mouse_event) {
-    e_menu_post_deactivate_callback_set(inst->menu, _cb_menu_post_deactivate, inst);
-    /* Proper menu orientation
-     *  We display not relatively to the gadget, but similarly to
-     *  the start menu - thus the need for direction etc.
-     */
-    switch (inst->gcc->gadcon->orient) {
-      case E_GADCON_ORIENT_TOP:
-      case E_GADCON_ORIENT_CORNER_TL:
-      case E_GADCON_ORIENT_CORNER_TR:
-        dir = E_MENU_POP_DIRECTION_DOWN;
-        break;
-      case E_GADCON_ORIENT_BOTTOM:
-      case E_GADCON_ORIENT_CORNER_BL:
-      case E_GADCON_ORIENT_CORNER_BR:
-        dir = E_MENU_POP_DIRECTION_UP;
-        break;
-
-      case E_GADCON_ORIENT_LEFT:
-      case E_GADCON_ORIENT_CORNER_LT:
-      case E_GADCON_ORIENT_CORNER_LB:
-        dir = E_MENU_POP_DIRECTION_RIGHT;
-        break;
-
-      case E_GADCON_ORIENT_RIGHT:
-      case E_GADCON_ORIENT_CORNER_RT:
-      case E_GADCON_ORIENT_CORNER_RB:
-        dir = E_MENU_POP_DIRECTION_LEFT;
-        break;
-
-      case E_GADCON_ORIENT_FLOAT:
-      case E_GADCON_ORIENT_HORIZ:
-      case E_GADCON_ORIENT_VERT:
-      default:
-        dir = E_MENU_POP_DIRECTION_AUTO;
-        break;
+    {
+      o = e_widget_label_add(evas, _("Empty"));
+      e_widget_table_object_align_append(inst->table, o, 0, row, 2, 1, 1, 0, 1, 0, 0.5, 0.5);
+      row++;
     }
-  }
-  return dir;
-}
 
+  o = e_widget_button_add(evas, _("Clear"), "edit-clear", _cb_clear_history, inst, NULL);
+  e_widget_disabled_set(o, !clip_inst->items);
+  e_widget_table_object_align_append(inst->table, o, 0, row, 1, 1, 0, 0, 0, 0, 0.5, 0.5);
+
+  o = e_widget_button_add(evas, _("Settings"), "preferences-system", _clipboard_config_show, inst, NULL);
+  e_widget_table_object_align_append(inst->table, o, 1, row, 1, 1, 0, 0, 0, 0, 0.5, 0.5);
+
+  e_gadcon_popup_content_set(inst->popup, inst->table);
+  e_gadcon_popup_show(inst->popup);
+
+  /*SHIT
+   * e_comp_object_util_autoclose(inst->popup->comp_object,
+                               _clipboard_popup_comp_del_cb,
+                               NULL,
+                               inst);*/
+  e_object_data_set(E_OBJECT(inst->popup), inst);
+  //E_OBJECT_DEL_SET(inst->popup, _clipboard_popup_del_cb);
+}
 static Eina_Bool
 _cb_event_selection(Instance *instance, int type __UNUSED__, Ecore_X_Event_Selection_Notify * event)
 {
@@ -481,7 +417,7 @@ _cb_event_owner(Instance *instance __UNUSED__, int type __UNUSED__, Ecore_X_Even
   /* If we lost owner of clipboard */
   if (event->reason && clip_inst->items)
      /* Reset clipboard and gain ownership of it */
-    _cb_menu_item(eina_list_data_get(clip_inst->items));
+    _clipboard_cb_paste_item(eina_list_data_get(clip_inst->items), NULL);
   else
     _cb_clipboard_request(NULL);
   return ECORE_CALLBACK_DONE;
@@ -573,7 +509,7 @@ clip_save(Eina_List *items, Eina_Bool force)
 }
 
 static void
-_cb_clear_history(Instance *inst __UNUSED__)
+_cb_clear_history(void *d1, void *d2 __UNUSED__)
 {
   EINA_SAFETY_ON_NULL_RETURN(clip_cfg);
 
@@ -589,6 +525,7 @@ _cb_clear_history(Instance *inst __UNUSED__)
   }
   else
     _clear_history();
+  _clipboard_popup_free((Instance *) d1);
 }
 
 static void
@@ -619,38 +556,33 @@ cb_clipboard_save(void *data __UNUSED__)
 }
 
 static void
-_cb_menu_item(Clip_Data *selected_clip)
+_clipboard_cb_paste_item(void *d1, void *d2)
 {
-  _x_clipboard_update(selected_clip->content);
+   _x_clipboard_update((const char *) d1);
+  if(d2)
+    _clipboard_popup_free((Instance *) d2);
 }
 
 static void
-_cb_menu_post_deactivate(void *data, E_Menu *menu __UNUSED__)
+_cb_menu_post_deactivate(void *data, E_Menu *menu EINA_UNUSED)
 {
   EINA_SAFETY_ON_NULL_RETURN(data);
-  Instance *inst = data;
 
-  if (inst->gcc)
-     e_gadcon_locked_set(inst->gcc->gadcon, EINA_FALSE);
-  if (inst->o_button && e_icon_edje_get(inst->o_button))
-     e_icon_edje_emit(inst->o_button, "e,state,unfocused", "e");
-  if (inst->menu) {
-    e_menu_post_deactivate_callback_set(inst->menu, NULL, NULL);
-    e_object_del(E_OBJECT(inst->menu));
-    inst->menu = NULL;
-  }
+  Instance *inst = data;
+  //e_gadcon_locked_set(inst->gcc->gadcon, 0);
+  edje_object_signal_emit(inst->o_button, "e,state,unfocused", "e");
 }
 
 static void
-_cb_action_switch(E_Object *o __UNUSED__, const char *params, Instance *data, Evas *evas __UNUSED__, Evas_Object *obj __UNUSED__, Mouse_Event *event)
+_cb_action_switch(E_Object *o __UNUSED__, const char *params, Instance *data, Evas *evas __UNUSED__, Evas_Object *obj __UNUSED__, Mouse_Event *event __UNUSED__)
 {
   if (!strcmp(params, "float"))
-    _cb_menu_show(data, NULL, NULL, event);
+    _clipboard_popup_new(data);
   else if (!strcmp(params, "settings"))
     _cb_config_show(data, NULL, NULL);
   else if (!strcmp(params, "clear"))
     /* Only call clear dialog if there is something to clear */
-    if (clip_inst->items) _cb_clear_history(NULL);
+    if (clip_inst->items) _cb_clear_history(NULL, NULL);
 }
 
 void
@@ -667,11 +599,7 @@ _clip_inst_free(Instance *inst)
 {
   EINA_SAFETY_ON_NULL_RETURN(inst);
   inst->gcc = NULL;
-  if (inst->menu) {
-    e_menu_post_deactivate_callback_set(inst->menu, NULL, NULL);
-    e_object_del(E_OBJECT(inst->menu));
-    inst->menu = NULL;
-  }
+
   if(inst->o_button)
     evas_object_del(inst->o_button);
   E_FREE(inst);
@@ -773,7 +701,7 @@ e_modapi_init (E_Module *m)
   hist_err = read_history(&(clip_inst->items), clip_cfg->ignore_ws, (unsigned int) clip_cfg->label_length);
 
   if (hist_err == EET_ERROR_NONE && eina_list_count(clip_inst->items))
-    _cb_menu_item(eina_list_data_get(clip_inst->items));
+    _clipboard_cb_paste_item(eina_list_data_get(clip_inst->items), NULL);
   else
     /* Something must be wrong with history file
      *   so we create a new one */
@@ -805,11 +733,20 @@ e_modapi_init (E_Module *m)
 }
 
 static void
-_cb_config_show(void *data __UNUSED__, E_Menu *m __UNUSED__, E_Menu_Item *mi __UNUSED__)
+_clipboard_config_show(void *d1, void *d2 __UNUSED__)
 {
   if (!clip_cfg) return;
   if (clip_cfg->config_dialog) return;
   config_clipboard_module(NULL, NULL);
+  _clipboard_popup_free((Instance *) d1);
+}
+
+static void
+_cb_config_show(void *data __UNUSED__,
+                E_Menu *m __UNUSED__,
+                E_Menu_Item *mi __UNUSED__)
+{
+  _clipboard_config_show(NULL, NULL);
 }
 
 /*
