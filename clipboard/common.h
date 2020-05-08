@@ -51,6 +51,13 @@ struct _Instance
     E_Gadcon_Client *gcc;
     Evas_Object *o_button, *table;
     E_Gadcon_Popup *popup;
+    struct
+      {
+         Ecore_X_Window win;
+         Ecore_Event_Handler *mouse_up;
+         Ecore_Event_Handler *key_down;
+         Ecore_Event_Handler *wheel;
+      } input;
 };
 
 typedef struct _Mod_Inst Mod_Inst;

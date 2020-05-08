@@ -63,6 +63,9 @@ static void      _clip_config_free(void);
 static void      _clip_inst_free(Instance *inst);
 static void      _clip_add_item(Clip_Data *clip_data);
 static void      _clipboard_popup_new(Instance *inst);
+static void      _clipboard_popup_input_win_new(Instance *inst);
+static void      _clipboard_popup_input_window_destroy(Instance *inst);
+static Eina_Bool _clipboard_popup_input_window_mouse_up_cb(void *data, int type __UNUSED__, void *event);
 static void      _clear_history(void);
 static void      _x_clipboard_update(const char *text);
 static Eina_List *     _item_in_history(Clip_Data *cd);
@@ -195,7 +198,7 @@ _gc_shutdown(E_Gadcon_Client *gcc)
    inst = gcc->data;
    _clipboard_popup_free(inst);
    _clip_inst_free(inst);
-  
+
 }
 
 static void
@@ -275,15 +278,16 @@ _cb_context_show(void *data,Evas *evas __UNUSED__, Evas_Object *obj __UNUSED__, 
 static void
 _clipboard_popup_free(Instance *inst)
 {
-	inst->o_button = NULL;
-	inst->table = NULL;
-	E_FN_DEL(e_object_del, inst->popup);
+  _clipboard_popup_input_window_destroy(inst);
+  inst->o_button = NULL;
+  inst->table = NULL;
+  E_FN_DEL(e_object_del, inst->popup);
 }
 
 static void
 _clipboard_popup_del_cb(void *obj)
 {
-	_clipboard_popup_free(e_object_data_get(obj));
+    _clipboard_popup_free(e_object_data_get(obj));
 }
 
 static void
@@ -358,7 +362,68 @@ _clipboard_popup_new(Instance *inst)
                                inst);*/
   e_object_data_set(E_OBJECT(inst->popup), inst);
   E_OBJECT_DEL_SET(inst->popup, _clipboard_popup_del_cb);
+  _clipboard_popup_input_win_new(inst);
 }
+
+static void
+_clipboard_popup_input_win_new(Instance *inst)
+{
+   Ecore_X_Window_Configure_Mask mask;
+   Ecore_X_Window w, popup_w;
+   E_Manager *man;
+
+   man = e_manager_current_get();
+
+   w = ecore_x_window_input_new(man->root, 0, 0, man->w, man->h);
+   mask = (ECORE_X_WINDOW_CONFIGURE_MASK_STACK_MODE |
+           ECORE_X_WINDOW_CONFIGURE_MASK_SIBLING);
+   popup_w = inst->popup->win->evas_win;
+   ecore_x_window_configure(w, mask, 0, 0, 0, 0, 0, popup_w,
+                            ECORE_X_WINDOW_STACK_BELOW);
+   ecore_x_window_show(w);
+
+   inst->input.mouse_up =
+     ecore_event_handler_add(ECORE_EVENT_MOUSE_BUTTON_UP,
+                             _clipboard_popup_input_window_mouse_up_cb, inst);
+   inst->input.wheel =
+     ecore_event_handler_add(ECORE_EVENT_MOUSE_WHEEL,
+                             _clipboard_popup_input_window_mouse_up_cb, inst);
+
+     inst->input.win = w;
+   e_grabinput_get(0, 0, inst->input.win);
+}
+
+static void
+_clipboard_popup_input_window_destroy(Instance *inst)
+{
+   e_grabinput_release(0, inst->input.win);
+   ecore_x_window_free(inst->input.win);
+   inst->input.win = 0;
+
+   ecore_event_handler_del(inst->input.mouse_up);
+   inst->input.mouse_up = NULL;
+
+   ecore_event_handler_del(inst->input.key_down);
+   inst->input.key_down = NULL;
+
+   ecore_event_handler_del(inst->input.wheel);
+   inst->input.wheel = NULL;
+}   
+
+static Eina_Bool
+_clipboard_popup_input_window_mouse_up_cb(void *data, int type __UNUSED__, void *event)
+{
+   Ecore_Event_Mouse_Button *ev = event;
+   Instance *inst = data;
+
+   if (ev->window != inst->input.win)
+     return ECORE_CALLBACK_PASS_ON;
+
+   _clipboard_popup_free(inst);
+
+   return ECORE_CALLBACK_PASS_ON;
+}
+
 static Eina_Bool
 _cb_event_selection(Instance *instance, int type __UNUSED__, Ecore_X_Event_Selection_Notify * event)
 {
