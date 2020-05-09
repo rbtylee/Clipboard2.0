@@ -41,6 +41,9 @@ static E_Config_DD *conf_item_edd = NULL;
 Mod_Inst *clip_inst = NULL; /* Need by e_mod_config.c */
 static E_Action *act = NULL;
 
+Instance *_INSTANCE = NULL;
+
+static void _clipboard_paste_cb(void *content);
 /*   First some callbacks   */
 static Eina_Bool _cb_clipboard_request(void *data __UNUSED__);
 
@@ -295,27 +298,36 @@ _clipboard_popup_new(Instance *inst)
 {
   EINA_SAFETY_ON_FALSE_RETURN(inst->popup == NULL);
   Evas *evas;
-  Evas_Object *o;
+  Evas_Object *o, *of, *il=NULL;
   int row = 0;
+
   // do not create twice
   if(inst->popup) return;
 
   inst->popup = e_gadcon_popup_new(inst->gcc);
   evas = inst->popup->win->evas;
 
-  inst->table = e_widget_table_add(evas, 0);
+  inst->table = e_widget_table_add(evas, EINA_FALSE);
 
   if (clip_inst->items){
     Eina_List *it;
     Clip_Data *clip;
+     _INSTANCE = inst;
 
     /* Flag to see if Label len changed */
     Eina_Bool label_length_changed = clip_cfg->label_length_changed;
     clip_cfg->label_length_changed = EINA_FALSE;
 
-    /* revert list if selected  */
+    /* reverse list if selected  */
     if (clip_cfg->hist_reverse)
       clip_inst->items=eina_list_reverse(clip_inst->items);
+
+   of = e_widget_framelist_add(evas, "", 0);
+   il = e_widget_ilist_add(evas, 24, 24, NULL);
+   evas_event_freeze(evas);
+   edje_freeze();
+   e_widget_ilist_freeze(il);
+   e_widget_ilist_selector_set(il, 1);
 
     /* show list in history menu  */
     EINA_LIST_FOREACH(clip_inst->items, it, clip)
@@ -325,16 +337,18 @@ _clipboard_popup_new(Instance *inst)
           set_clip_name(&clip->name, clip->content,
                          clip_cfg->ignore_ws, clip_cfg->label_length);
         }
-        o = e_widget_button_add(evas,
-                                clip->name,
-                                NULL,
-                                _clipboard_cb_paste_item,
-                                clip->content,
-                                inst);
-        e_widget_table_object_align_append(inst->table, o, 0, row, 2, 1, 1, 0, 1, 0, 0, 0.5);
-        row++;
+
+        e_widget_ilist_append(il, NULL, clip->name, _clipboard_paste_cb, (void *) clip->content, NULL);
       }
-    /* revert list back if selected  */
+
+   e_widget_ilist_go(il);
+   e_widget_ilist_thaw(il);
+   edje_thaw();
+   evas_event_thaw(evas);
+   e_widget_framelist_object_append_full(of, il, 1, 1, 1, 1, 0.5, 0.5, 200, 300, 9999, 9999);
+   e_widget_table_object_align_append(inst->table, of, 0, row, 2, 1, 1, 0, 1, 0, 0, 0.5);
+    row++;
+    /* reverse list back if selected  */
     if (clip_cfg->hist_reverse)
       clip_inst->items=eina_list_reverse(clip_inst->items);
   }
@@ -342,8 +356,9 @@ _clipboard_popup_new(Instance *inst)
     {
       o = e_widget_label_add(evas, _("Empty"));
       e_widget_table_object_align_append(inst->table, o, 0, row, 2, 1, 1, 0, 1, 0, 0.5, 0.5);
-      row++;
+      //row++;
     }
+    row++;
 
   o = e_widget_button_add(evas, _("Clear"), "edit-clear", _cb_clear_history, inst, NULL);
   e_widget_disabled_set(o, !clip_inst->items);
@@ -355,11 +370,6 @@ _clipboard_popup_new(Instance *inst)
   e_gadcon_popup_content_set(inst->popup, inst->table);
   e_gadcon_popup_show(inst->popup);
 
-  /*SHIT
-   * e_comp_object_util_autoclose(inst->popup->comp_object,
-                               _clipboard_popup_comp_del_cb,
-                               NULL,
-                               inst);*/
   e_object_data_set(E_OBJECT(inst->popup), inst);
   E_OBJECT_DEL_SET(inst->popup, _clipboard_popup_del_cb);
   _clipboard_popup_input_win_new(inst);
@@ -408,7 +418,7 @@ _clipboard_popup_input_window_destroy(Instance *inst)
 
    ecore_event_handler_del(inst->input.wheel);
    inst->input.wheel = NULL;
-}   
+}
 
 static Eina_Bool
 _clipboard_popup_input_window_mouse_up_cb(void *data, int type __UNUSED__, void *event)
@@ -628,6 +638,13 @@ _clipboard_cb_paste_item(void *content, void *inst)
   if(inst)
     _clipboard_popup_free((Instance *) inst);
 }
+static void
+_clipboard_paste_cb(void *content)
+{
+    Instance * inst = _INSTANCE;
+    _clipboard_cb_paste_item( content, inst);
+}
+
 
 static void
 _cb_menu_post_deactivate(void *data, E_Menu *menu EINA_UNUSED)
