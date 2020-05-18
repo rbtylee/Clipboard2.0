@@ -632,19 +632,18 @@ cb_clipboard_save(void *data __UNUSED__)
 }
 
 static void
-_clipboard_cb_paste_item(void *content, void *inst)
+_clipboard_cb_paste_item(void *d1, void *d2)
 {
-   _x_clipboard_update((const char *) content);
-  if(inst)
-    _clipboard_popup_free((Instance *) inst);
-}
-static void
-_clipboard_paste_cb(void *content)
-{
-    Instance * inst = _INSTANCE;
-    _clipboard_cb_paste_item( content, inst);
+   Clip_Data *cd = (Clip_Data *) d1;
+   _x_clipboard_update(cd->content);
+  if(d2)
+    _clipboard_popup_free((Instance *) d2);
 }
 
+static void _clipboard_paste_cb(void *content)
+{
+   _x_clipboard_update((char *)content);
+}
 
 static void
 _cb_menu_post_deactivate(void *data, E_Menu *menu EINA_UNUSED)
