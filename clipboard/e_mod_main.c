@@ -51,7 +51,7 @@ static Eina_Bool _cb_event_selection(Instance *instance, int type __UNUSED__, Ec
 static Eina_Bool _cb_event_owner(Instance *instance __UNUSED__, int type __UNUSED__, Ecore_X_Event_Fixes_Selection_Notify * event);
 static void      _cb_menu_post_deactivate(void *data, E_Menu *menu __UNUSED__);
 static void      _cb_context_show(void *data, Evas *evas __UNUSED__, Evas_Object *obj __UNUSED__, Mouse_Event *event);
-static void      _clipboard_cb_paste_item(void *content, void *inst);
+static void      _clipboard_cb_paste_item(void *clip, void *inst);
 static void      _cb_clear_history(void *inst, void *data __UNUSED__);
 static void      _cb_dialog_delete(void *data __UNUSED__);
 static void      _cb_dialog_keep(void *data __UNUSED__);
@@ -632,12 +632,12 @@ cb_clipboard_save(void *data __UNUSED__)
 }
 
 static void
-_clipboard_cb_paste_item(void *d1, void *d2)
+_clipboard_cb_paste_item(void *clip, void *inst);
 {
-   Clip_Data *cd = (Clip_Data *) d1;
+   Clip_Data *cd = (Clip_Data *) clip;
    _x_clipboard_update(cd->content);
   if(d2)
-    _clipboard_popup_free((Instance *) d2);
+    _clipboard_popup_free((Instance *) inst);
 }
 
 static void _clipboard_paste_cb(void *content)
