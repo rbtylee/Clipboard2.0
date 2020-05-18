@@ -636,7 +636,7 @@ _clipboard_cb_paste_item(void *clip, void *inst);
 {
    Clip_Data *cd = (Clip_Data *) clip;
    _x_clipboard_update(cd->content);
-  if(d2)
+  if(inst)
     _clipboard_popup_free((Instance *) inst);
 }
 
