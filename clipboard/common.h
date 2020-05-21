@@ -49,7 +49,8 @@ struct _Instance
 
     /* pointer to this gadget's container */
     E_Gadcon_Client *gcc;
-    Evas_Object *o_button, *table;
+    Evas_Object *o_button;
+    Evas_Object *list;
     E_Gadcon_Popup *popup;
     struct
       {
